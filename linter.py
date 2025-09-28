@@ -45,7 +45,6 @@ def parse_instr(line, cmt_char=";"):
         if rest:
             tokens = rest.split(None, 1)
             mnem = tokens[0].lower()
-            mnem = tokens[0].lower()
             ops = tokens[1] if len(tokens) > 1 else ""
             return ("i", label, mnem, ops, cmt)
         else:
