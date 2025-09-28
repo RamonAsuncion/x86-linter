@@ -40,7 +40,8 @@ def parse_instr(line, cmt_char=";"):
         label_part, after_label = code.split(":", 1)
         label = label_part.strip()
         rest = after_label.strip()
-        print("label:", label)
+        if DEBUG:
+            print("label:", label)
         if rest:
             tokens = rest.split(None, 1)
             mnem = tokens[0].lower()
@@ -111,7 +112,6 @@ def align_file(file_path, output_path=None, cmt_char=";", col=40, gap=2):
         elif t == "c":
             line = f"{cmt_char} {cmt}"
         elif t == "l":
-            print("This is a label")
             line = f"{label}:"
         elif t in ("i", "k"):
             parts = []
@@ -121,9 +121,9 @@ def align_file(file_path, output_path=None, cmt_char=";", col=40, gap=2):
                 parts.append(indent)
 
             parts.append(mnem.ljust(widths["mnemonic"]))
-            #if DEBUG:
-            print(f"Part 1: {len(parts[0])}\nPart 2: {len(parts[1])}")
-            print(parts)
+            if DEBUG:
+                print(f"Part 1: {len(parts[0])}\nPart 2: {len(parts[1])}")
+                print(parts)
             if ops:
                 parts.append(" " * gap + ops)
 
@@ -134,7 +134,8 @@ def align_file(file_path, output_path=None, cmt_char=";", col=40, gap=2):
 
         if cmt and t not in ("c", "b"):
             width = abs(len(line) - col) + 1
-            print(f"Width: {width}")
+            if DEBUG:
+                print(f"Width: {width}")
             line += (" " * width) + f"{cmt_char} {cmt}"
 
         out_lines.append(line)
