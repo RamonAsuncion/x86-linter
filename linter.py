@@ -4,12 +4,6 @@ import re
 DEBUG = False
 TABSIZE = 4
 
-
-def get_indent_level(line_of_code):
-    match = re.match(r"^(\t*)", line_of_code)
-    return len(match.group(1)) if match else 0
-
-
 def check_mixed_indentation(lines):
     # TODO: Check for tabs / spaces depending on flag.
     for idx, line in enumerate(lines, 1):
@@ -21,63 +15,73 @@ def check_mixed_indentation(lines):
 
 
 def parse_instr(line, cmt_char=";"):
-    # type, indent_or_label, mnemonic, operands, comment
-    indentation = len(line) - len(line.lstrip())
-    s_line = line.strip()
+    """ Parse one line of assembly into tuple
 
-    # constants
-    for word in ["equ", "%assign", "%define", "section", "bits", "org", "global", "extern"]:
-        if re.search(r"\b" + word + r"\b", s_line.lower()):
-            code, _, cmt = s_line.partition(cmt_char)
-            tokens = code.strip().split(None, maxsplit=1)
-            if not tokens:
-                return ["k", "", "", "", cmt.strip()]
-            keyword = tokens[0]
-            ops = tokens[1] if len(tokens) > 1 else ""
-            return ["k", "", keyword, ops, cmt.strip()]
+    Returns:
+        type: b=blank, c=comment, l=label, k=keyword, i=instruction
+    """
+    raw = line.rstrip("\n")
+    s_line = raw.strip()
 
     # blank line
     if not s_line:
-        return ["b", "", "", "", ""]
+        return ("b", "", "", "", "")
 
     # comment only
-    if s_line.lstrip().startswith(cmt_char):
-        print(f"Indent: {indentation}, Comment: {s_line[1:].strip()}")
-        return ["c", indentation, "", "", s_line[1:].strip()]
-
-    # label
-    if re.match(r"^[\w.]+:$", s_line):
-        return ["l", line, "", "", ""]
+    if s_line.startswith(cmt_char):
+        if DEBUG: print(f"Indent: {indentation}, Comment: {s_line[1:].strip()}")
+        return ("c", "", "", "", s_line.lstrip(cmt_char).strip())
 
     code, _, cmt = s_line.partition(cmt_char)
-    cmt = cmt.strip() if cmt else ""
+    cmt = cmt.strip()
+
+    # label (ends with :)
+    if ":" in code:
+        label_part, after_label = code.split(":", 1)
+        label = label_part.strip()
+        rest = after_label.strip()
+        print("label:", label)
+        if rest:
+            tokens = rest.split(None, 1)
+            mnem = tokens[0].lower()
+            mnem = tokens[0].lower()
+            ops = tokens[1] if len(tokens) > 1 else ""
+            return ("i", label, mnem, ops, cmt)
+        else:
+            return ("l", label, "", "", cmt)
+
     tokens = code.strip().split(None, 1)
-    mnemonic = tokens[0] if tokens else ""
-    ops = tokens[1] if len(tokens) > 1 else ""
+    if not tokens:
+        return ("b", "", "", "", cmt)
 
-    return ["i", "", mnemonic, ops, cmt]
+    first = tokens[0].lower()
+    rest = tokens[1] if len(tokens) > 1 else ""
 
+    if first in ("equ", "%assign", "%define", "section", "bits", "org", "global", "extern"):
+        return ("k", "", first, rest, cmt)
 
-def format_line(mnemonic, operands, cmt, col=40, indent=True, keyword=False):
-    prefix = " " * TABSIZE if indent else ""
+    return ("i", "", first, rest, cmt)
 
-    if keyword:
-        line = f"{prefix}{mnemonic:<20} {operands}".rstrip()
-    else:
-        line = f"{prefix}{mnemonic:<8} {operands}".rstrip()
-    if DEBUG and not indent:
-        print(f"Current line {line}")
-    if cmt:
-        visual_len = len(line)
-        padding = max(1, col - visual_len)
-        line += " " * padding + f"; {cmt}"
-    return line
+def compute_width(parsed):
+    label_width = 0
+    mnemonic_width = 0
+    ops_width = 0
 
+    for t, label, mnem, ops, _ in parsed:
+        if label:
+            label_width = max(label_width, len(label))
+        if mnem:
+            mnemonic_width = max(mnemonic_width, len(mnem))
+        if ops:
+            ops_width = max(ops_width, len(ops))
 
-def align_file(file_path, output_path=None, cmt_char=";", col=40, tabsize=4):
-    global TABSIZE
-    TABSIZE = tabsize
+    return {
+        "label": label_width,
+        "mnemonic": mnemonic_width,
+        "ops": ops_width,
+    }
 
+def align_file(file_path, output_path=None, cmt_char=";", col=40, gap=2):
     if file_path == output_path:
         user_choice = input(f"Do you want to overwrite: {file_path}? [Y/n] ")
         if user_choice.lower() not in ("y", ""):
@@ -89,46 +93,53 @@ def align_file(file_path, output_path=None, cmt_char=";", col=40, tabsize=4):
         if DEBUG:
             check_mixed_indentation(lines)
 
-    blank_line = 0
-    result_lines = []
-    macro_buf = []
+    parsed = [parse_instr(line, cmt_char) for line in lines]
+    widths = compute_width(parsed)
+    if DEBUG:
+        print("Gap: ", widths["label"] + gap)
+    indent = " " * (widths["label"] + gap + 1) # + 1 for colon
 
-    for line in lines:
-        typ, indent_or_label, mnemonic, ops, cmt = parse_instr(line, cmt_char)
+    if DEBUG:
+        print("Label length", widths["label"])
+        print("Mnemonic length", widths["mnemonic"])
+        print("Ops length", widths["ops"])
 
-        line = line.rstrip()
+    out_lines = []
+    for t, label, mnem, ops, cmt in parsed:
+        if t == "b":
+            line = ""
+        elif t == "c":
+            line = f"{cmt_char} {cmt}"
+        elif t == "l":
+            print("This is a label")
+            line = f"{label}:"
+        elif t in ("i", "k"):
+            parts = []
+            if label:
+                parts.append(f"{label}:".ljust(len(indent)))
+            else:
+                parts.append(indent)
 
-        if typ == "b":
-            blank_line += 1
-            if blank_line <= 2:
-                result_lines.append("")
-            continue
+            parts.append(mnem.ljust(widths["mnemonic"]))
+            #if DEBUG:
+            print(f"Part 1: {len(parts[0])}\nPart 2: {len(parts[1])}")
+            print(parts)
+            if ops:
+                parts.append(" " * gap + ops)
+
+            line = "".join(parts)
         else:
-            blank_line = 0
+            line = ""
 
-        if typ == "l":
-            result_lines.append(indent_or_label)
-        elif typ == "k":
-            keyword_line = format_line(
-                mnemonic, ops, cmt, col, indent=False, keyword=True
-            )
-            result_lines.append(keyword_line)
-        elif typ == "c":
-            #indent_level = indent_or_label
-            #indent_spaces = min(indent_level, TABSIZE) * " "
-            #cmt = cmt.lstrip()
-            #comment_line = f"{indent_spaces}; {cmt}"
-            #result_lines.append(comment_line)
-            result_lines.append(cmt)
-        elif typ == "i":
-            instr = format_line(mnemonic, ops, cmt, col, indent=True, keyword=False)
-            result_lines.append(instr)
 
-    while result_lines and result_lines[-1].strip() == "":
-        result_lines.pop()
-    result_lines.append("")
+        if cmt and t not in ("c", "b"):
+            width = abs(len(line) - col) + 1
+            print(f"Width: {width}")
+            line += (" " * width) + f"{cmt_char} {cmt}"
 
-    output = "\n".join(result_lines) + "\n"
+        out_lines.append(line)
+
+    output = "\n".join(out_lines) + "\n"
 
     if output_path:
         with open(output_path, "w") as f:
@@ -154,11 +165,11 @@ def main():
     parser.add_argument(
         "-m", "--comment-char", default=";", help="Comment character (default: ;)"
     )
-    parser.add_argument("-t", "--tabsize", type=int, default=4, help="Tab size (default: 4)")
+    parser.add_argument("-g", "--gapsize", type=int, default=2, help="Spaces between columns (default: 2)")
 
     args = parser.parse_args()
 
-    align_file(args.input, args.output, args.comment_char, args.col, args.tabsize)
+    align_file(args.input, args.output, args.comment_char, args.col, args.gapsize)
 
 
 if __name__ == "__main__":
